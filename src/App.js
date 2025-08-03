@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
 
 // --- Helper Functions & Initial Data ---
 const PACKAGE_OPTIONS = ['None', 'Food', 'Food & Drink'];
@@ -61,6 +61,7 @@ export default function App() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
+    const [isConfirmingClear, setIsConfirmingClear] = useState(false);
 
     useEffect(() => {
         const initializeFirebase = async () => {
@@ -145,6 +146,18 @@ export default function App() {
             console.error("Error deleting group:", err);
         }
     };
+
+    const clearAllGroups = async () => {
+        if (!db) return;
+        const batch = writeBatch(db);
+        const q = query(collection(db, "groups"));
+        const snapshot = await getDocs(q);
+        snapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+        setIsConfirmingClear(false);
+    };
     
     if (error) return (<div className="bg-black text-white min-h-screen flex items-center justify-center font-inter"><div className="bg-red-500 p-8 rounded-lg shadow-2xl text-center"><h2 className="text-2xl font-bold mb-2">Error</h2><p>{error}</p></div></div>);
     if (isLoading) return (<div className="bg-black text-white min-h-screen flex items-center justify-center font-inter"><p>Connecting to Service...</p></div>);
@@ -165,7 +178,18 @@ export default function App() {
                 <div className="max-w-7xl mx-auto">
                     <header className="flex flex-wrap justify-between items-center gap-4 mb-6 pb-4 border-b border-gray-700">
                         <img src="https://images.squarespace-cdn.com/content/v1/6280b73cb41908114afef4a1/5bb4bba5-e8c3-4c38-b672-08c0b4ee1f4c/serve-social.png" alt="Serve Social Logo" className="h-10" />
-                        <button onClick={addGroup} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-lg"><PlusCircleIcon />Add Group</button>
+                        <div className="flex items-center gap-2">
+                            {!isConfirmingClear ? (
+                                <button onClick={() => setIsConfirmingClear(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">CLEAR</button>
+                            ) : (
+                                <div className="flex items-center gap-2 bg-gray-800 p-2 rounded-lg">
+                                    <span className="text-gray-300 text-sm">Are you sure?</span>
+                                    <button onClick={clearAllGroups} className="bg-red-700 hover:bg-red-800 text-white font-bold py-1 px-3 rounded-lg text-sm">YES</button>
+                                    <button onClick={() => setIsConfirmingClear(false)} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-1 px-3 rounded-lg text-sm">NO</button>
+                                </div>
+                            )}
+                            <button onClick={addGroup} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-lg"><PlusCircleIcon />Add Group</button>
+                        </div>
                     </header>
                     <div className="space-y-4">
                         {groups.map((group) => (
@@ -213,6 +237,7 @@ const GroupSummary = ({ group, onUpdate, onExpand }) => {
                             {group.assignedTeamMember && <><span className="text-gray-600">|</span><span className="font-semibold text-gray-300">{group.assignedTeamMember}</span></>}
                         </div>
                          <p className="text-xs text-gray-400 mt-1">{(group.activities || []).join(' → ')}</p>
+                         {group.notes && <p className="text-xs text-gray-300 mt-1 pt-1 border-t border-gray-700/50 italic">{group.notes}</p>}
                          {dietarySummary && <p className="text-xs text-amber-400 mt-1">{dietarySummary}</p>}
                     </div>
                 </div>
