@@ -268,7 +268,7 @@ const GroupSummary = ({ group, onUpdate, onExpand }) => {
     const { brief, chkd, food, paid, done } = group.status || {};
     const isFullyComplete = brief && chkd && food && paid && done;
     const hasFoodPackage = group.package === 'Food' || group.package === 'Food & Drink';
-    const dietarySummary = Object.entries(group.dietary || {}).filter(([, count]) => count > 0).map(([key, count]) => `${DIETARY_OPTIONS[key]}: ${count}`).join(' | ');
+    const dietarySummary = Object.entries(group.dietary || {}).filter(([, count]) => count > 0).map(([key, count]) => `${DIETARY_OPTIONS[key]}: ${count}`).join(' <span class="text-gray-600">|</span> ');
     const handleStatusChange = (e, statusField) => { e.stopPropagation(); onUpdate(group.id, { [`status.${statusField}`]: !group.status[statusField] }); };
     const cardClasses = `rounded-2xl shadow-md border p-4 cursor-pointer transition-all duration-300 ${isFullyComplete ? 'bg-green-900/40 border-green-700/50' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'}`;
     
@@ -299,11 +299,11 @@ const GroupSummary = ({ group, onUpdate, onExpand }) => {
                         </div>
                          <p className="text-xs text-gray-400 mt-1">{(group.activities || []).join(' → ')}</p>
                          {group.notes && <p className="text-xs text-gray-300 mt-1 pt-1 border-t border-gray-700/50 italic">{group.notes}</p>}
-                         {dietarySummary && <p className="text-xs text-amber-400 mt-1">{dietarySummary}</p>}
+                         {dietarySummary && <p className="text-xs text-amber-400 mt-1" dangerouslySetInnerHTML={{ __html: dietarySummary }}></p>}
                     </div>
                 </div>
                 <div className="flex items-start gap-4">
-                    {hasFoodPackage && (<div className="flex gap-2 text-center border-r border-gray-700 pr-4"><div><p className="font-bold text-lg">{totalPizzas} / {pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div><div><p className="font-bold text-lg">{totalSnacks} / {snackEstimate}</p><p className="text-xs text-gray-400">Snacks</p></div></div>)}
+                    {hasFoodPackage && (<div className="flex gap-2 text-center"><div className="bg-gray-700/50 px-3 py-1 rounded-md"><p className="font-bold text-lg">{totalPizzas} / {pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div><div className="bg-gray-700/50 px-3 py-1 rounded-md"><p className="font-bold text-lg">{totalSnacks} / {snackEstimate}</p><p className="text-xs text-gray-400">Snacks</p></div></div>)}
                     <div className="flex flex-col gap-2">
                         <div className="flex gap-2"><StatusButton label="BRIEF" active={brief} onClick={(e) => handleStatusChange(e, 'brief')} /><StatusButton label="CHECK" active={chkd} onClick={(e) => handleStatusChange(e, 'chkd')} /><StatusButton label="FOOD" active={food} onClick={(e) => handleStatusChange(e, 'food')} /></div>
                         <div className="flex gap-2"><StatusButton label="PAID" active={paid} onClick={(e) => handleStatusChange(e, 'paid')} /><StatusButton label="DONE" active={done} onClick={(e) => handleStatusChange(e, 'done')} /></div>
