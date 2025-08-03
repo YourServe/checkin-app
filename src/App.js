@@ -1,31 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs, where } from 'firebase/firestore';
 
 // --- Helper Functions & Initial Data ---
 const PACKAGE_OPTIONS = ['None', 'Food', 'Food & Drink'];
 const ALL_ACTIVITIES = ['Ping Pong', 'Darts', 'Shuffleboard', 'Cornhole', 'Escape Rooms'];
 const DIETARY_OPTIONS = { gf: 'GF', df: 'DF', ve: 'VE', vg: 'VG', nt: 'NT' };
-
-// Food items to correctly calculate totals from the detailed kitchen data
-const FOOD_ITEMS = {
-    pizzas: {
-        chickenPizza: 'Chicken Pizza',
-        hawaiianPizza: 'Hawaiian Pizza',
-        kuniPizza: 'Kuni Pizza',
-        margaritaPizza: 'Margarita Pizza',
-        mushroomPizza: 'Mushroom Pizza',
-        peperoniPizza: 'Peperoni Pizza',
-    },
-    snacks: {
-        fries: 'Fries',
-        waffleFries: 'Waffle Fries',
-        hashBites: 'Hash Bites',
-        chickenBites: 'Chicken Bites',
-        cornNuggets: 'Corn Nuggets',
-    }
-};
 
 const formatTime = (time24) => {
     if (!time24) return '';
@@ -75,6 +56,7 @@ const firebaseConfig = {
 export default function App() {
     const [groups, setGroups] = useState([]);
     const [teamMembers, setTeamMembers] = useState([]);
+    const [foodItems, setFoodItems] = useState({ pizzas: {}, snacks: {} });
     const [dailyStats, setDailyStats] = useState({ people: 0, pizzaActual: 0, pizzaEstimate: 0, snackActual: 0, snackEstimate: 0, drinks: 0 });
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
@@ -114,6 +96,18 @@ export default function App() {
     // --- Data Fetching & Stat Calculation ---
     useEffect(() => {
         if (!db || !auth?.currentUser) return;
+        
+        const foodItemsCollectionRef = collection(db, "foodItems");
+        const unsubscribeFoodItems = onSnapshot(foodItemsCollectionRef, (snapshot) => {
+            const items = { pizzas: {}, snacks: {} };
+            snapshot.forEach(doc => {
+                if (doc.id === 'pizzas' || doc.id === 'snacks') {
+                    items[doc.id] = doc.data();
+                }
+            });
+            setFoodItems(items);
+        });
+
         const qGroups = query(collection(db, "groups"));
         const unsubscribeGroups = onSnapshot(qGroups, (snapshot) => {
             const groupsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -137,8 +131,9 @@ export default function App() {
                     pizzaEstimate += Math.ceil((Number(g.teamSize) || 0) / 2);
                     snackEstimate += Math.ceil((Number(g.teamSize) || 0) / 2);
                 }
-                pizzaActual += Object.keys(FOOD_ITEMS.pizzas).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
-                snackActual += Object.keys(FOOD_ITEMS.snacks).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
+                // Use the fetched foodItems to calculate totals
+                pizzaActual += Object.keys(foodItems.pizzas).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
+                snackActual += Object.keys(foodItems.snacks).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
             });
 
             setDailyStats({ people, pizzaActual, pizzaEstimate, snackActual, snackEstimate, drinks });
@@ -150,8 +145,8 @@ export default function App() {
             setTeamMembers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, err => console.error("Error fetching team members:", err));
 
-        return () => { unsubscribeGroups(); unsubscribeTeamMembers(); };
-    }, [db, auth?.currentUser]);
+        return () => { unsubscribeGroups(); unsubscribeTeamMembers(); unsubscribeFoodItems(); };
+    }, [db, auth?.currentUser, foodItems]); // Add foodItems to dependency array
 
     // --- Data Manipulation ---
     const addGroup = async () => {
@@ -243,7 +238,7 @@ export default function App() {
                     </header>
                     <div className="space-y-4">
                         {groups.map((group) => (
-                            <GroupCardWrapper key={group.id} group={group} teamMembers={teamMembers} onUpdate={updateGroup} onDeleteGroup={deleteGroup} onManageTeam={() => setIsTeamModalOpen(true)}/>
+                            <GroupCardWrapper key={group.id} group={group} teamMembers={teamMembers} foodItems={foodItems} onUpdate={updateGroup} onDeleteGroup={deleteGroup} onManageTeam={() => setIsTeamModalOpen(true)}/>
                         ))}
                         {groups.length === 0 && !isLoading && (
                             <div className="text-center py-16 px-4 bg-gray-900 rounded-lg"><h3 className="text-xl font-semibold text-gray-300">No groups found.</h3><p className="text-gray-500 mt-2">Click "Add Group" to get started.</p></div>
@@ -257,14 +252,14 @@ export default function App() {
 }
 
 // --- Components ---
-const GroupCardWrapper = ({ group, teamMembers, onUpdate, onDeleteGroup, onManageTeam }) => {
+const GroupCardWrapper = ({ group, teamMembers, foodItems, onUpdate, onDeleteGroup, onManageTeam }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     return isExpanded 
         ? <GroupDetails group={group} teamMembers={teamMembers} onUpdate={onUpdate} onDeleteGroup={onDeleteGroup} onCollapse={() => setIsExpanded(false)} onManageTeam={onManageTeam} />
-        : <GroupSummary group={group} onUpdate={onUpdate} onExpand={() => setIsExpanded(true)} />;
+        : <GroupSummary group={group} foodItems={foodItems} onUpdate={onUpdate} onExpand={() => setIsExpanded(true)} />;
 };
 
-const GroupSummary = ({ group, onUpdate, onExpand }) => {
+const GroupSummary = ({ group, foodItems, onUpdate, onExpand }) => {
     const { brief, chkd, food, paid, done } = group.status || {};
     const isFullyComplete = brief && chkd && food && paid && done;
     const hasFoodPackage = group.package === 'Food' || group.package === 'Food & Drink';
@@ -272,8 +267,8 @@ const GroupSummary = ({ group, onUpdate, onExpand }) => {
     const handleStatusChange = (e, statusField) => { e.stopPropagation(); onUpdate(group.id, { [`status.${statusField}`]: !group.status[statusField] }); };
     const cardClasses = `rounded-2xl shadow-md border p-4 cursor-pointer transition-all duration-300 ${isFullyComplete ? 'bg-green-900/40 border-green-700/50' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'}`;
     
-    const totalPizzas = Object.keys(FOOD_ITEMS.pizzas).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
-    const totalSnacks = Object.keys(FOOD_ITEMS.snacks).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
+    const totalPizzas = Object.keys(foodItems.pizzas).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
+    const totalSnacks = Object.keys(foodItems.snacks).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
     const pizzaEstimate = Math.ceil((Number(group.teamSize) || 0) / 2);
     const snackEstimate = Math.ceil((Number(group.teamSize) || 0) / 2);
 
