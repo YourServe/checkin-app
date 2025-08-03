@@ -8,6 +8,25 @@ const PACKAGE_OPTIONS = ['None', 'Food', 'Food & Drink'];
 const ALL_ACTIVITIES = ['Ping Pong', 'Darts', 'Shuffleboard', 'Cornhole', 'Escape Rooms'];
 const DIETARY_OPTIONS = { gf: 'GF', df: 'DF', ve: 'VE', vg: 'VG', nt: 'NT' };
 
+// Food items to correctly calculate totals from the detailed kitchen data
+const FOOD_ITEMS = {
+    pizzas: {
+        chickenPizza: 'Chicken Pizza',
+        hawaiianPizza: 'Hawaiian Pizza',
+        kuniPizza: 'Kuni Pizza',
+        margaritaPizza: 'Margarita Pizza',
+        mushroomPizza: 'Mushroom Pizza',
+        peperoniPizza: 'Peperoni Pizza',
+    },
+    snacks: {
+        fries: 'Fries',
+        waffleFries: 'Waffle Fries',
+        hashBites: 'Hash Bites',
+        chickenBites: 'Chicken Bites',
+        cornNuggets: 'Corn Nuggets',
+    }
+};
+
 const formatTime = (time24) => {
     if (!time24) return '';
     const [hours, minutes] = time24.split(':');
@@ -56,6 +75,7 @@ const firebaseConfig = {
 export default function App() {
     const [groups, setGroups] = useState([]);
     const [teamMembers, setTeamMembers] = useState([]);
+    const [dailyStats, setDailyStats] = useState({ people: 0, pizzaActual: 0, pizzaEstimate: 0, snackActual: 0, snackEstimate: 0, drinks: 0 });
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -91,14 +111,38 @@ export default function App() {
         initializeFirebase();
     }, [isLoading]);
 
-    // --- Data Fetching ---
+    // --- Data Fetching & Stat Calculation ---
     useEffect(() => {
         if (!db || !auth?.currentUser) return;
         const qGroups = query(collection(db, "groups"));
         const unsubscribeGroups = onSnapshot(qGroups, (snapshot) => {
             const groupsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            groupsData.sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
+            groupsData.sort((a, b) => a.time.localeCompare(b.time)); 
             setGroups(groupsData);
+
+            // Calculate Stats
+            let people = 0;
+            let pizzaActual = 0;
+            let pizzaEstimate = 0;
+            let snackActual = 0;
+            let snackEstimate = 0;
+            let drinks = 0;
+
+            groupsData.forEach(g => {
+                people += Number(g.teamSize) || 0;
+                if (g.package === 'Food & Drink') {
+                    drinks += (Number(g.teamSize) || 0) * 2;
+                }
+                if (g.package === 'Food' || g.package === 'Food & Drink') {
+                    pizzaEstimate += Math.ceil((Number(g.teamSize) || 0) / 2);
+                    snackEstimate += Math.ceil((Number(g.teamSize) || 0) / 2);
+                }
+                pizzaActual += Object.keys(FOOD_ITEMS.pizzas).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
+                snackActual += Object.keys(FOOD_ITEMS.snacks).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
+            });
+
+            setDailyStats({ people, pizzaActual, pizzaEstimate, snackActual, snackEstimate, drinks });
+
         }, err => console.error("Error fetching groups:", err));
 
         const qTeamMembers = query(collection(db, "teamMembers"));
@@ -116,7 +160,7 @@ export default function App() {
         const newGroup = {
             teamName: "New Team", time: lastGroupTime, teamSize: 2, activities: [], package: 'None',
             status: { brief: false, chkd: false, food: false, paid: false, done: false },
-            notes: "", foodOrder: { pizzas: 0, snacks: 0, fries: 0 },
+            notes: "", foodOrder: {},
             dietary: { gf: 0, df: 0, ve: 0, vg: 0, nt: 0 },
             createdAt: new Date(), assignedTeamMember: "",
         };
@@ -146,7 +190,7 @@ export default function App() {
             console.error("Error deleting group:", err);
         }
     };
-
+    
     const clearAllGroups = async () => {
         if (!db) return;
         const batch = writeBatch(db);
@@ -176,8 +220,14 @@ export default function App() {
             `}</style>
             <div className="bg-black min-h-screen font-inter text-white p-4 sm:p-6 lg:p-8">
                 <div className="max-w-7xl mx-auto">
-                    <header className="flex flex-wrap justify-between items-center gap-4 mb-6 pb-4 border-b border-gray-700">
+                    <header className="flex flex-wrap justify-between items-center gap-4 mb-6">
                         <img src="https://images.squarespace-cdn.com/content/v1/6280b73cb41908114afef4a1/5bb4bba5-e8c3-4c38-b672-08c0b4ee1f4c/serve-social.png" alt="Serve Social Logo" className="h-10" />
+                        <div className="flex items-center gap-6 text-center">
+                            <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.people}</p><p className="text-xs text-gray-400">People</p></div>
+                            <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.pizzaActual} / {dailyStats.pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div>
+                            <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.snackActual} / {dailyStats.snackEstimate}</p><p className="text-xs text-gray-400">Snacks</p></div>
+                             <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.drinks}</p><p className="text-xs text-gray-400">Drinks</p></div>
+                        </div>
                         <div className="flex items-center gap-2">
                             {!isConfirmingClear ? (
                                 <button onClick={() => setIsConfirmingClear(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">CLEAR</button>
@@ -218,10 +268,21 @@ const GroupSummary = ({ group, onUpdate, onExpand }) => {
     const { brief, chkd, food, paid, done } = group.status || {};
     const isFullyComplete = brief && chkd && food && paid && done;
     const hasFoodPackage = group.package === 'Food' || group.package === 'Food & Drink';
-    const dietarySummary = Object.entries(group.dietary || {}).filter(([, count]) => count > 0).map(([key, count]) => `${DIETARY_OPTIONS[key]}: ${count}`).join(', ');
+    const dietarySummary = Object.entries(group.dietary || {}).filter(([, count]) => count > 0).map(([key, count]) => `${DIETARY_OPTIONS[key]}: ${count}`).join(' | ');
     const handleStatusChange = (e, statusField) => { e.stopPropagation(); onUpdate(group.id, { [`status.${statusField}`]: !group.status[statusField] }); };
     const cardClasses = `rounded-2xl shadow-md border p-4 cursor-pointer transition-all duration-300 ${isFullyComplete ? 'bg-green-900/40 border-green-700/50' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'}`;
     
+    const totalPizzas = Object.keys(FOOD_ITEMS.pizzas).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
+    const totalSnacks = Object.keys(FOOD_ITEMS.snacks).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
+    const pizzaEstimate = Math.ceil((Number(group.teamSize) || 0) / 2);
+    const snackEstimate = Math.ceil((Number(group.teamSize) || 0) / 2);
+
+    const PackageBadge = ({ pkg }) => {
+        if (pkg === 'Food') return <span className="text-xs font-bold bg-yellow-500 text-yellow-900 px-2 py-1 rounded-md">{pkg}</span>;
+        if (pkg === 'Food & Drink') return <span className="text-xs font-bold bg-purple-500 text-white px-2 py-1 rounded-md">{pkg}</span>;
+        return <span className="text-xs text-gray-400">{pkg}</span>
+    };
+
     return (
         <div onClick={onExpand} className={cardClasses}>
             <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
@@ -233,7 +294,7 @@ const GroupSummary = ({ group, onUpdate, onExpand }) => {
                     <div>
                         <span className="font-bold text-xl text-white">{group.teamName}</span>
                         <div className="text-xs text-gray-400 flex flex-wrap items-center gap-x-2">
-                            <span>{group.package}</span>
+                            <PackageBadge pkg={group.package} />
                             {group.assignedTeamMember && <><span className="text-gray-600">|</span><span className="font-semibold text-gray-300">{group.assignedTeamMember}</span></>}
                         </div>
                          <p className="text-xs text-gray-400 mt-1">{(group.activities || []).join(' → ')}</p>
@@ -242,7 +303,7 @@ const GroupSummary = ({ group, onUpdate, onExpand }) => {
                     </div>
                 </div>
                 <div className="flex items-start gap-4">
-                    {hasFoodPackage && (<div className="flex gap-2 text-center border-r border-gray-700 pr-4"><div><p className="font-bold text-lg">{group.foodOrder?.pizzas || 0}</p><p className="text-xs text-gray-400">Pizzas</p></div><div><p className="font-bold text-lg">{group.foodOrder?.snacks || 0}</p><p className="text-xs text-gray-400">Snacks</p></div><div><p className="font-bold text-lg">{group.foodOrder?.fries || 0}</p><p className="text-xs text-gray-400">Fries</p></div></div>)}
+                    {hasFoodPackage && (<div className="flex gap-2 text-center border-r border-gray-700 pr-4"><div><p className="font-bold text-lg">{totalPizzas} / {pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div><div><p className="font-bold text-lg">{totalSnacks} / {snackEstimate}</p><p className="text-xs text-gray-400">Snacks</p></div></div>)}
                     <div className="flex flex-col gap-2">
                         <div className="flex gap-2"><StatusButton label="BRIEF" active={brief} onClick={(e) => handleStatusChange(e, 'brief')} /><StatusButton label="CHECK" active={chkd} onClick={(e) => handleStatusChange(e, 'chkd')} /><StatusButton label="FOOD" active={food} onClick={(e) => handleStatusChange(e, 'food')} /></div>
                         <div className="flex gap-2"><StatusButton label="PAID" active={paid} onClick={(e) => handleStatusChange(e, 'paid')} /><StatusButton label="DONE" active={done} onClick={(e) => handleStatusChange(e, 'done')} /></div>
@@ -343,23 +404,6 @@ const TeamManagementModal = ({ isOpen, onClose, teamMembers, onAdd, onDelete }) 
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-            <div className="bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md border border-gray-700">
-                <h2 className="text-2xl font-bold mb-4">Manage Team</h2>
-                <div className="flex gap-2 mb-4">
-                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="New member name" className="flex-grow bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"/>
-                    <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg"><PlusCircleIcon className="w-6 h-6"/></button>
-                </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {teamMembers.map(member => (
-                        <div key={member.id} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg">
-                            <span>{member.name}</span>
-                            <button onClick={() => onDelete(member.id)} className="text-gray-500 hover:text-red-500"><Trash2Icon className="w-5 h-5"/></button>
-                        </div>
-                    ))}
-                </div>
-                <button onClick={onClose} className="mt-6 w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Done</button>
-            </div>
-        </div>
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div className="bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-lg border border-gray-700"><h2 className="text-2xl font-bold mb-4">Manage Team</h2><div className="flex gap-2 mb-4"><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="New member name" className="flex-grow bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"/><button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg"><PlusCircleIcon className="w-6 h-6"/></button></div><div className="grid grid-cols-2 gap-4 max-h-60 overflow-y-auto"><div><h3 className="font-semibold text-lg mb-2">Team Members</h3><div className="space-y-2">{teamMembers.map(member => (<div key={member.id} className="flex justify-between items-center bg-gray-800 p-2 rounded-lg"><span>{member.name}</span><button onClick={() => onDelete(member.id)} className="text-gray-500 hover:text-red-500"><Trash2Icon className="w-5 h-5"/></button></div>))}</div></div></div><button onClick={onClose} className="mt-6 w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Done</button></div></div>
     );
 };
