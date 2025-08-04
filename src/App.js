@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs, where, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
 
 // --- Helper Functions & Initial Data ---
 const PACKAGE_OPTIONS = ['None', 'Food', 'Food & Drink'];
@@ -297,14 +297,14 @@ const GroupSummary = ({ group, foodItems, onUpdate, onExpand }) => {
                          <p className="text-xs text-gray-400 mt-2">{activitySummary}</p>
                          <div className="mt-2 text-left">
                             <div className="grid grid-cols-[auto,1fr] gap-x-2">
-                                <h4 className="text-xs text-gray-500 flex-shrink-0 self-start">Area</h4>
+                                <h4 className="text-xs text-gray-500 flex-shrink-0 self-start pt-1">Area</h4>
                                 <div className="flex flex-wrap gap-1">{(group.assignedAreas || []).map(area => <span key={area} className="text-sm font-semibold bg-blue-900/50 text-blue-300 px-2 py-1 rounded">{area}</span>)}</div>
                             </div>
                         </div>
                          {dietarySummary.length > 0 && 
                             <div className="mt-2 text-left">
                                 <div className="flex items-start gap-2">
-                                    <h4 className="text-xs text-gray-500 flex-shrink-0">Dietary</h4>
+                                    <h4 className="text-xs text-gray-500 flex-shrink-0 pt-1">Dietary</h4>
                                     <div className="flex flex-wrap gap-2">
                                         {dietarySummary.map(([key, count]) => <span key={key} className="text-sm font-semibold bg-amber-900/50 text-amber-300 px-2 py-1 rounded">{DIETARY_OPTIONS[key]} {count}</span>)}
                                     </div>
