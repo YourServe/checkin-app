@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs, where, setDoc } from 'firebase/firestore';
 
 // --- Helper Functions & Initial Data ---
 const PACKAGE_OPTIONS = ['None', 'Food', 'Food & Drink'];
@@ -16,6 +16,16 @@ const formatTime = (time24) => {
     const ampm = h >= 12 ? 'PM' : 'AM';
     const h12 = h % 12 || 12;
     return `${h12}:${m < 10 ? '0' : ''}${m} ${ampm}`;
+};
+
+const formatCurrentTime = (date) => {
+    let hours = date.getHours();
+    let minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // the hour '0' should be '12'
+    minutes = minutes < 10 ? '0'+minutes : minutes;
+    return { time: `${hours}:${minutes}`, ampm: ampm };
 };
 
 const calculateEndTime = (startTime, activityBlocks) => {
@@ -89,6 +99,12 @@ export default function App() {
     const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
     const [isAreaModalOpen, setIsAreaModalOpen] = useState(false);
     const [isConfirmingClear, setIsConfirmingClear] = useState(false);
+    const [currentTime, setCurrentTime] = useState(new Date());
+
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         const initializeFirebase = async () => {
@@ -155,8 +171,8 @@ export default function App() {
                 pizzaEstimate += Math.ceil((Number(g.teamSize) || 0) / 2);
                 snackEstimate += Math.ceil((Number(g.teamSize) || 0) / 2);
             }
-            pizzaActual += Object.keys(foodItems.pizzas).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
-            snackActual += Object.keys(foodItems.snacks).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
+            pizzaActual += Object.keys(foodItems.pizzas || {}).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
+            snackActual += Object.keys(foodItems.snacks || {}).reduce((sum, key) => sum + (g.foodOrder?.[key] || 0), 0);
         });
         setDailyStats({ people, pizzaActual, pizzaEstimate, snackActual, snackEstimate, drinks });
     }, [groups, foodItems]);
@@ -166,7 +182,7 @@ export default function App() {
         if (!db) return;
         const lastGroupTime = groups.length > 0 ? groups[groups.length - 1].time : "19:00";
         await addDoc(collection(db, "groups"), {
-            teamName: "New Team", time: lastGroupTime, teamSize: 2, activities: [], package: 'None',
+            teamName: "New Team", time: lastGroupTime, teamSize: 2, package: 'None',
             status: { brief: false, chkd: false, food: false, paid: false, done: false },
             notes: "", foodOrder: {}, dietary: { gf: 0, df: 0, ve: 0, vg: 0, nt: 0 },
             createdAt: new Date(), assignedTeamMember: "", assignedAreas: [],
@@ -190,6 +206,8 @@ export default function App() {
         setIsConfirmingClear(false);
     };
     
+    const { time, ampm } = formatCurrentTime(currentTime);
+
     if (error) return (<div className="bg-black text-white min-h-screen flex items-center justify-center font-inter"><div className="bg-red-500 p-8 rounded-lg shadow-2xl text-center"><h2 className="text-2xl font-bold mb-2">Error</h2><p>{error}</p></div></div>);
     if (isLoading) return (<div className="bg-black text-white min-h-screen flex items-center justify-center font-inter"><p>Connecting to Service...</p></div>);
 
@@ -204,6 +222,9 @@ export default function App() {
                 <div className="max-w-7xl mx-auto">
                     <header className="flex flex-wrap justify-between items-center gap-4 mb-6">
                         <img src="https://images.squarespace-cdn.com/content/v1/6280b73cb41908114afef4a1/5bb4bba5-e8c3-4c38-b672-08c0b4ee1f4c/serve-social.png" alt="Serve Social Logo" className="h-10" />
+                        <div className="bg-transparent border border-white px-4 py-2 rounded-lg text-center">
+                            <p className="text-2xl font-bold">{time}<span className="text-base ml-1">{ampm}</span></p>
+                        </div>
                         <div className="flex items-center gap-6 text-center">
                             <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.people}</p><p className="text-xs text-gray-400">People</p></div>
                             <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.pizzaActual} / {dailyStats.pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div>
@@ -241,12 +262,12 @@ const GroupSummary = ({ group, foodItems, onUpdate, onExpand }) => {
     const { brief, chkd, food, paid, done } = group.status || {};
     const isFullyComplete = brief && chkd && food && paid && done;
     const hasFoodPackage = group.package === 'Food' || group.package === 'Food & Drink';
-    const dietarySummary = Object.entries(group.dietary || {}).filter(([, count]) => count > 0).map(([key, count]) => `${DIETARY_OPTIONS[key]}: ${count}`).join(' <span class="text-gray-600">|</span> ');
+    const dietarySummary = Object.entries(group.dietary || {}).filter(([, count]) => count > 0);
     const handleStatusChange = (e, statusField) => { e.stopPropagation(); onUpdate(group.id, { [`status.${statusField}`]: !group.status[statusField] }); };
     const cardClasses = `rounded-2xl shadow-md border p-4 cursor-pointer transition-all duration-300 ${isFullyComplete ? 'bg-green-900/40 border-green-700/50' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'}`;
     
-    const totalPizzas = Object.keys(foodItems.pizzas).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
-    const totalSnacks = Object.keys(foodItems.snacks).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
+    const totalPizzas = Object.keys(foodItems.pizzas || {}).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
+    const totalSnacks = Object.keys(foodItems.snacks || {}).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
     const pizzaEstimate = Math.ceil((Number(group.teamSize) || 0) / 2);
     const snackEstimate = Math.ceil((Number(group.teamSize) || 0) / 2);
     const endTime = calculateEndTime(group.time, group.activityBlocks);
@@ -260,23 +281,37 @@ const GroupSummary = ({ group, foodItems, onUpdate, onExpand }) => {
 
     return (
         <div onClick={onExpand} className={cardClasses}>
-            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-                <div className="flex items-center gap-4 flex-grow min-w-0">
+            <div className="flex items-start justify-between gap-x-6">
+                <div className="flex items-start gap-4 flex-grow min-w-0">
                     <div className="text-center w-24 flex-shrink-0">
                         <div className="text-lg">{formatTime(group.time)}</div>
                         <div className="text-sm text-gray-400">to {formatTime(endTime)}</div>
                         <div className="text-4xl font-bold text-white mt-1">{group.teamSize}</div>
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-grow">
                         <span className="font-bold text-xl text-white truncate">{group.teamName}</span>
                         <div className="text-xs text-gray-400 flex flex-wrap items-center gap-x-2">
                             <PackageBadge pkg={group.package} />
                             {group.assignedTeamMember && <><span className="text-gray-600">|</span><span className="font-semibold text-gray-300">{group.assignedTeamMember}</span></>}
                         </div>
-                         <div className="flex flex-wrap gap-1 mt-1">{(group.assignedAreas || []).map(area => <span key={area} className="text-xs bg-gray-700 px-2 py-1 rounded">{area}</span>)}</div>
-                         <p className="text-xs text-gray-400 mt-1">{activitySummary}</p>
-                         {group.notes && <p className="text-xs text-gray-300 mt-1 pt-1 border-t border-gray-700/50 italic">{group.notes}</p>}
-                         {dietarySummary && <p className="text-xs text-amber-400 mt-1" dangerouslySetInnerHTML={{ __html: dietarySummary }}></p>}
+                         <p className="text-xs text-gray-400 mt-2">{activitySummary}</p>
+                         <div className="mt-2 text-left">
+                            <div className="grid grid-cols-[auto,1fr] gap-x-2">
+                                <h4 className="text-xs text-gray-500 flex-shrink-0 self-start">Area</h4>
+                                <div className="flex flex-wrap gap-1">{(group.assignedAreas || []).map(area => <span key={area} className="text-sm font-semibold bg-blue-900/50 text-blue-300 px-2 py-1 rounded">{area}</span>)}</div>
+                            </div>
+                        </div>
+                         {dietarySummary.length > 0 && 
+                            <div className="mt-2 text-left">
+                                <div className="flex items-start gap-2">
+                                    <h4 className="text-xs text-gray-500 flex-shrink-0">Dietary</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {dietarySummary.map(([key, count]) => <span key={key} className="text-sm font-semibold bg-amber-900/50 text-amber-300 px-2 py-1 rounded">{DIETARY_OPTIONS[key]} {count}</span>)}
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                         {group.notes && <p className="text-xs text-gray-300 mt-2 pt-2 border-t border-gray-700/50 italic">{group.notes}</p>}
                     </div>
                 </div>
                 <div className="flex items-start gap-4 flex-shrink-0">
