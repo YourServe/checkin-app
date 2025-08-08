@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, writeBatch, getDocs, where, setDoc } from 'firebase/firestore';
 
 // --- Helper Functions & Initial Data ---
 const PACKAGE_OPTIONS = ['None', 'Food', 'Food & Drink'];
@@ -183,7 +183,7 @@ export default function App() {
         const lastGroupTime = groups.length > 0 ? groups[groups.length - 1].time : "19:00";
         await addDoc(collection(db, "groups"), {
             teamName: "New Team", time: lastGroupTime, teamSize: 2, package: 'None',
-            status: { brief: false, chkd: false, food: false, paid: false, done: false },
+            status: { brief: false, chkd: false, food: false, paid: false, done: false, foodReady: false },
             notes: "", foodOrder: {}, dietary: { gf: 0, df: 0, ve: 0, vg: 0, nt: 0 },
             createdAt: new Date(), assignedTeamMember: "", assignedAreas: [],
             activityBlocks: []
@@ -225,11 +225,11 @@ export default function App() {
                         <div className="bg-transparent border border-white px-4 py-2 rounded-lg text-center">
                             <p className="text-2xl font-bold">{time}<span className="text-base ml-1">{ampm}</span></p>
                         </div>
-                        <div className="flex items-center gap-6 text-center">
-                            <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.people}</p><p className="text-xs text-gray-400">People</p></div>
-                            <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.pizzaActual} / {dailyStats.pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div>
-                            <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.snackActual} / {dailyStats.snackEstimate}</p><p className="text-xs text-gray-400">Snacks</p></div>
-                             <div className="bg-gray-800 px-4 py-2 rounded-lg"><p className="text-2xl font-bold">{dailyStats.drinks}</p><p className="text-xs text-gray-400">Drinks</p></div>
+                        <div className="flex items-center gap-2 lg:gap-4 text-center">
+                            <div className="bg-gray-800 px-3 py-2 rounded-lg"><p className="text-xl lg:text-2xl font-bold">{dailyStats.people}</p><p className="text-xs text-gray-400">People</p></div>
+                            <div className="bg-gray-800 px-3 py-2 rounded-lg"><p className="text-xl lg:text-2xl font-bold">{dailyStats.pizzaActual} / {dailyStats.pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div>
+                            <div className="bg-gray-800 px-3 py-2 rounded-lg"><p className="text-xl lg:text-2xl font-bold">{dailyStats.snackActual} / {dailyStats.snackEstimate}</p><p className="text-xs text-gray-400">Snacks</p></div>
+                             <div className="bg-gray-800 px-3 py-2 rounded-lg"><p className="text-xl lg:text-2xl font-bold">{dailyStats.drinks}</p><p className="text-xs text-gray-400">Drinks</p></div>
                         </div>
                         <div className="flex items-center gap-2">
                             {!isConfirmingClear ? (<button onClick={() => setIsConfirmingClear(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">CLEAR</button>) : (<div className="flex items-center gap-2 bg-gray-800 p-2 rounded-lg"><span className="text-gray-300 text-sm">Are you sure?</span><button onClick={clearAllGroups} className="bg-red-700 hover:bg-red-800 text-white font-bold py-1 px-3 rounded-lg text-sm">YES</button><button onClick={() => setIsConfirmingClear(false)} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-1 px-3 rounded-lg text-sm">NO</button></div>)}
@@ -259,12 +259,12 @@ const GroupCardWrapper = ({ group, teamMembers, foodItems, areas, onUpdate, onDe
 };
 
 const GroupSummary = ({ group, foodItems, onUpdate, onExpand }) => {
-    const { brief, chkd, food, paid, done } = group.status || {};
+    const { brief, chkd, food, paid, done, foodReady } = group.status || {};
     const isFullyComplete = brief && chkd && food && paid && done;
     const hasFoodPackage = group.package === 'Food' || group.package === 'Food & Drink';
     const dietarySummary = Object.entries(group.dietary || {}).filter(([, count]) => count > 0);
     const handleStatusChange = (e, statusField) => { e.stopPropagation(); onUpdate(group.id, { [`status.${statusField}`]: !group.status[statusField] }); };
-    const cardClasses = `rounded-2xl shadow-md border p-4 cursor-pointer transition-all duration-300 ${isFullyComplete ? 'bg-green-900/40 border-green-700/50' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'}`;
+    const cardClasses = `rounded-2xl shadow-md border p-4 cursor-pointer transition-all duration-300 ${isFullyComplete ? 'bg-green-900/40 border-green-700/50' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'} ${foodReady ? 'ring-4 ring-yellow-500/80' : ''}`;
     
     const totalPizzas = Object.keys(foodItems.pizzas || {}).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
     const totalSnacks = Object.keys(foodItems.snacks || {}).reduce((sum, key) => sum + (group.foodOrder?.[key] || 0), 0);
@@ -296,9 +296,9 @@ const GroupSummary = ({ group, foodItems, onUpdate, onExpand }) => {
                         </div>
                          <p className="text-xs text-gray-400 mt-2">{activitySummary}</p>
                          <div className="mt-2 text-left">
-                            <div className="grid grid-cols-[auto,1fr] gap-x-2">
-                                <h4 className="text-xs text-gray-500 flex-shrink-0 self-start pt-1">Area</h4>
-                                <div className="flex flex-wrap gap-1">{(group.assignedAreas || []).map(area => <span key={area} className="text-sm font-semibold bg-blue-900/50 text-blue-300 px-2 py-1 rounded">{area}</span>)}</div>
+                            <div className="grid grid-cols-[auto,1fr] items-start gap-x-2">
+                                <h4 className="text-xs text-gray-500 flex-shrink-0 pt-1">Area</h4>
+                                <div className="grid grid-cols-3 gap-1">{(group.assignedAreas || []).map(area => <span key={area} className="text-sm font-semibold bg-blue-900/50 text-blue-300 px-2 py-1 rounded truncate">{area}</span>)}</div>
                             </div>
                         </div>
                          {dietarySummary.length > 0 && 
@@ -311,14 +311,34 @@ const GroupSummary = ({ group, foodItems, onUpdate, onExpand }) => {
                                 </div>
                             </div>
                         }
-                         {group.notes && <p className="text-xs text-gray-300 mt-2 pt-2 border-t border-gray-700/50 italic">{group.notes}</p>}
+                         {group.notes && <p className="text-sm text-gray-300 mt-2 pt-2 border-t border-gray-700/50">{group.notes}</p>}
                     </div>
                 </div>
                 <div className="flex items-start gap-4 flex-shrink-0">
                     {hasFoodPackage && (<div className="flex flex-col gap-2"><div className="bg-gray-700/50 px-3 py-1 rounded-md text-center"><p className="font-bold text-lg">{totalPizzas} / {pizzaEstimate}</p><p className="text-xs text-gray-400">Pizzas</p></div><div className="bg-gray-700/50 px-3 py-1 rounded-md text-center"><p className="font-bold text-lg">{totalSnacks} / {snackEstimate}</p><p className="text-xs text-gray-400">Snacks</p></div></div>)}
                     <div className="flex flex-col gap-2">
-                        <div className="flex gap-2"><StatusButton label="BRIEF" active={brief} onClick={(e) => handleStatusChange(e, 'brief')} /><StatusButton label="CHECK" active={chkd} onClick={(e) => handleStatusChange(e, 'chkd')} /><StatusButton label="FOOD" active={food} onClick={(e) => handleStatusChange(e, 'food')} /></div>
+                        <div className="flex gap-2 items-center">
+                            <StatusButton label="BRIEF" active={brief} onClick={(e) => handleStatusChange(e, 'brief')} /><StatusButton label="CHECK" active={chkd} onClick={(e) => handleStatusChange(e, 'chkd')} /><StatusButton label="FOOD" active={food} onClick={(e) => handleStatusChange(e, 'food')} />
+                        </div>
                         <div className="flex gap-2"><StatusButton label="PAID" active={paid} onClick={(e) => handleStatusChange(e, 'paid')} /><StatusButton label="DONE" active={done} onClick={(e) => handleStatusChange(e, 'done')} /></div>
+                        {hasFoodPackage && (
+                            <button
+                                onClick={(e) => {
+                                    if (foodReady) {
+                                        e.stopPropagation();
+                                        onUpdate(group.id, { 'status.foodReady': false });
+                                    }
+                                }}
+                                className={`w-full mt-2 py-2 rounded-md text-xs font-bold transition-colors ${
+                                    foodReady
+                                        ? 'bg-yellow-500 text-black cursor-pointer'
+                                        : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                }`}
+                                disabled={!foodReady}
+                            >
+                                FOOD READY
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
